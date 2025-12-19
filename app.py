@@ -31,7 +31,7 @@ try:
 except Exception:
     st.title("SIMULATEUR DE DEVIS")
 
-st.subheader("Excursions & Tours")
+st.subheader("Simulateur de devis")
 
 # =========================
 # CHARGEMENT DONNÉES
@@ -192,4 +192,5 @@ with st.expander("📊 Voir l'historique des devis"):
                 os.remove(hist_file)
                 st.rerun()
     else:
+
         st.write("Aucun historique pour le moment. Générez votre premier devis !")
