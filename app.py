@@ -79,16 +79,27 @@ st.subheader("📝 Besoins spécifiques")
 notes = st.text_area("Régime alimentaire, allergies ou demandes particulières", key=f"nt_{st.session_state['form_id']}")
 
 # =========================
-# SECTION 4 : OPTIONS & PARTICIPANTS
+# SECTION 4 : OPTIONS & PARTICIPANTS (LOGIQUE MODIFIÉE)
 # =========================
 st.divider()
 st.subheader("➕ Options & Participants")
-c1, c2 = st.columns(2)
-with c1:
-    repas = st.checkbox("🍽 Repas (+10 €/pers.)", key=f"rp_{st.session_state['form_id']}")
-    guide = st.checkbox("🧭 Guide (+15 €/pers.)", key=f"gd_{st.session_state['form_id']}")
-    visite = st.checkbox("🎫 Visites (+5 €/pers.)", key=f"vs_{st.session_state['form_id']}")
-with c2:
+
+# Logique : Si Mer -> Options incluses d'office
+is_mer = (type_exc.lower() == "en mer" or "mer" in type_exc.lower())
+
+c_opt1, c_opt2 = st.columns(2)
+with c_opt1:
+    if is_mer:
+        st.write("✨ *Options incluses dans le forfait Mer*")
+        repas = st.checkbox("🍽 Repas", value=True, disabled=True, key="rp_m")
+        guide = st.checkbox("🧭 Guide", value=True, disabled=True, key="gd_m")
+        visite = st.checkbox("🎫 Visites site", value=True, disabled=True, key="vs_m")
+    else:
+        repas = st.checkbox("🍽 Repas (+10 €/pers.)", key=f"rp_{st.session_state['form_id']}")
+        guide = st.checkbox("🧭 Guide (+15 €/pers.)", key=f"gd_{st.session_state['form_id']}")
+        visite = st.checkbox("🎫 Visites (+5 €/pers.)", key=f"vs_{st.session_state['form_id']}")
+
+with c_opt2:
     nb = st.number_input("Nombre de personnes (Pax)", min_value=1, value=1, key=f"nb_{st.session_state['form_id']}")
     marge = st.number_input("Marge (%)", min_value=0, value=20, key=f"m_{st.session_state['form_id']}")
 
@@ -97,8 +108,14 @@ with c2:
 # =========================
 if row is not None:
     p_base = row["Prix"]
-    supps = (10 if repas else 0) + (15 if guide else 0) + (5 if visite else 0)
-    total_unit = p_base + supps
+    
+    # Si c'est terrestre, on ajoute les suppléments. Si c'est mer, suppléments = 0 car déjà dans p_base.
+    if is_mer:
+        total_unit = p_base
+    else:
+        supps = (10 if repas else 0) + (15 if guide else 0) + (5 if visite else 0)
+        total_unit = p_base + supps
+        
     total_devis = (total_unit * nb) * (1 + marge / 100)
 
     st.divider()
@@ -110,80 +127,68 @@ if row is not None:
         else:
             pdf = FPDF()
             pdf.add_page()
-            
             try:
                 pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-                font_f = "DejaVu"
+                f_f = "DejaVu"
             except:
-                font_f = "Arial"
+                f_f = "Arial"
 
-            # En-tête
-            pdf.set_font(font_f, size=18)
+            # Design PDF
+            pdf.set_font(f_f, size=18)
             pdf.cell(0, 15, "DEVIS PRESTATION TOURISTIQUE", ln=True, align='C')
-            pdf.set_font(font_f, size=10)
+            pdf.set_font(f_f, size=10)
             pdf.cell(0, 5, f"Référence : {ref} | Date : {datetime.now().strftime('%d/%m/%Y')}", ln=True, align='C')
             pdf.ln(10)
 
-            # Infos Client & Détails Excursion
-            pdf.set_font(font_f, size=11)
+            pdf.set_font(f_f, size=11)
             pdf.cell(0, 7, f"Client : {nom}", ln=True)
-            pdf.cell(0, 7, f"Formule choisie : {formule}", ln=True)
-            pdf.cell(0, 7, f"Transport : {transport}", ln=True)
-            pdf.cell(0, 7, f"Nombre de participants : {nb} personne(s)", ln=True)
+            pdf.cell(0, 7, f"Excursion : {type_exc} | Formule : {formule}", ln=True)
+            pdf.cell(0, 7, f"Participants : {nb} pers.", ln=True)
             pdf.ln(5)
 
-            # Tableau des prix
+            # Tableau
             pdf.set_fill_color(230, 230, 230)
-            pdf.set_font(font_f, size=10)
-            pdf.cell(90, 10, "Description de la prestation", 1, 0, 'C', True)
-            pdf.cell(30, 10, "Quantité", 1, 0, 'C', True)
-            pdf.cell(30, 10, "Prix Unitaire", 1, 0, 'C', True)
+            pdf.cell(90, 10, "Description", 1, 0, 'C', True)
+            pdf.cell(30, 10, "Qté", 1, 0, 'C', True)
+            pdf.cell(30, 10, "P.U (€)", 1, 0, 'C', True)
             pdf.cell(35, 10, "Total (€)", 1, 1, 'C', True)
             
-            # Ligne de base (Circuit)
-            pdf.cell(90, 8, f"Circuit : {circuit}", 1)
+            # Ligne principale
+            desc_principal = f"Circuit : {circuit}"
+            if is_mer: desc_principal += " (Options incluses)"
+            
+            pdf.cell(90, 8, desc_principal, 1)
             pdf.cell(30, 8, f"{nb}", 1, 0, 'C')
             pdf.cell(30, 8, f"{p_base:.2f}", 1, 0, 'C')
             pdf.cell(35, 8, f"{p_base * nb:.2f}", 1, 1, 'C')
             
-            # Options
-            if repas:
-                pdf.cell(90, 8, "Option : Repas", 1)
-                pdf.cell(30, 8, f"{nb}", 1, 0, 'C')
-                pdf.cell(30, 8, "10.00", 1, 0, 'C')
-                pdf.cell(35, 8, f"{10 * nb:.2f}", 1, 1, 'C')
-            if guide:
-                pdf.cell(90, 8, "Option : Guide", 1)
-                pdf.cell(30, 8, f"{nb}", 1, 0, 'C')
-                pdf.cell(30, 8, "15.00", 1, 0, 'C')
-                pdf.cell(35, 8, f"{15 * nb:.2f}", 1, 1, 'C')
-            if visite:
-                pdf.cell(90, 8, "Option : Droits de visite", 1)
-                pdf.cell(30, 8, f"{nb}", 1, 0, 'C')
-                pdf.cell(30, 8, "5.00", 1, 0, 'C')
-                pdf.cell(35, 8, f"{5 * nb:.2f}", 1, 1, 'C')
+            # Options (uniquement si terrestre et cochées)
+            if not is_mer:
+                if repas:
+                    pdf.cell(90, 8, "Option : Repas", 1); pdf.cell(30, 8, f"{nb}", 1, 0, 'C'); pdf.cell(30, 8, "10.00", 1, 0, 'C'); pdf.cell(35, 8, f"{10*nb:.2f}", 1, 1, 'C')
+                if guide:
+                    pdf.cell(90, 8, "Option : Guide", 1); pdf.cell(30, 8, f"{nb}", 1, 0, 'C'); pdf.cell(30, 8, "15.00", 1, 0, 'C'); pdf.cell(35, 8, f"{15*nb:.2f}", 1, 1, 'C')
+                if visite:
+                    pdf.cell(90, 8, "Option : Visites", 1); pdf.cell(30, 8, f"{nb}", 1, 0, 'C'); pdf.cell(30, 8, "5.00", 1, 0, 'C'); pdf.cell(35, 8, f"{5*nb:.2f}", 1, 1, 'C')
 
-            # Ligne Total
-            pdf.set_font(font_f, size=11)
+            # Total
+            pdf.set_font(f_f, size=11)
             pdf.cell(150, 10, "TOTAL TTC À PAYER", 1, 0, 'R', True)
             pdf.cell(35, 10, f"{total_devis:.2f} EUR", 1, 1, 'C', True)
 
-            # Notes / Besoins spécifiques
             if notes:
-                pdf.ln(5)
-                pdf.set_text_color(200, 0, 0)
+                pdf.ln(5); pdf.set_text_color(200, 0, 0)
                 pdf.multi_cell(0, 6, f"Demandes particulières : {notes}", border=1)
                 pdf.set_text_color(0, 0, 0)
 
             pdf_bytes = bytes(pdf.output())
             st.download_button("⬇️ Télécharger le PDF", pdf_bytes, f"devis_{nom}.pdf", "application/pdf")
             
-            # Enregistrement historique
-            new_row = {"Date": datetime.now().strftime("%Y-%m-%d"), "Client": nom, "Formule": formule, "Circuit": circuit, "Pax": nb, "Total": round(total_devis, 2)}
+            # Historique
+            new_row = {"Date": datetime.now().strftime("%Y-%m-%d"), "Client": nom, "Circuit": circuit, "Total": round(total_devis, 2)}
             pd.DataFrame([new_row]).to_csv("historique_devis.csv", mode='a', header=not os.path.exists("historique_devis.csv"), index=False, encoding='utf-8-sig')
 
     st.button("🔄 Nouveau devis", on_click=clear_form)
-
 
 # =========================
 # HISTORIQUE RAPIDE (CORRIGÉ)
@@ -215,3 +220,4 @@ with st.expander("📊 Voir l'historique des devis"):
                 st.rerun()
     else:
         st.write("Aucun historique pour le moment. Générez votre premier devis !")
+
