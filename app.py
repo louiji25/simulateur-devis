@@ -142,8 +142,7 @@ if row is not None:
 
             pdf.set_font(f_f, size=11)
             pdf.cell(0, 7, f"Client : {nom}", ln=True)
-            pdf.cell(0, 7, f"Excursion : {type_exc}, ln=True)
-            pdf.cell(0, 7, f"Formule : {formule}", ln=True)
+            pdf.cell(0, 7, f"Excursion : {type_exc} | Formule : {formule}", ln=True)
             pdf.cell(0, 7, f"Participants : {nb} pers.", ln=True)
             pdf.ln(5)
 
@@ -221,6 +220,7 @@ with st.expander("📊 Voir l'historique des devis"):
                 st.rerun()
     else:
         st.write("Aucun historique pour le moment. Générez votre premier devis !")
+
 
 
 
