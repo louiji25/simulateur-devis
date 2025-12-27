@@ -2,225 +2,182 @@ import streamlit as st
 import pandas as pd
 import uuid
 from fpdf import FPDF
-from PIL import Image
 import os
 from datetime import datetime
+import base64
+import urllib.parse
 
 # =========================
-# CONFIG PAGE
+# CONFIGURATION MOBILE
 # =========================
-st.set_page_config(page_title="Simulateur de devis", layout="centered")
+st.set_page_config(page_title="Laka Am'lay POS", layout="centered")
 
-def clear_form():
-    st.session_state["form_id"] = str(uuid.uuid4())
+# Style CSS pour les boutons
+st.markdown("""
+    <style>
+    .stButton>button { width: 100%; height: 3.5em; font-size: 16px !important; border-radius: 10px; margin-top: 10px; }
+    .btn-print { background-color: #FF4B4B !important; color: white !important; }
+    .btn-new { background-color: #f0f2f6 !important; color: black !important; }
+    .btn-whatsapp { background-color: #25D366 !important; color: white !important; }
+    iframe { border-radius: 10px; border: 1px solid #ddd; }
+    </style>
+    """, unsafe_allow_html=True)
+
+HIST_FILE = "historique_devis.csv"
+INFO_FILE = "infos.csv"
+RIB_FILE = "rib_agence.csv"
+
+def reset_app():
+    for key in st.session_state.keys():
+        del st.session_state[key]
     st.rerun()
 
-if "form_id" not in st.session_state:
-    st.session_state["form_id"] = str(uuid.uuid4())
+# --- Fonctions Fichiers ---
+def get_info_df():
+    if os.path.exists(INFO_FILE):
+        return pd.read_csv(INFO_FILE)
+    return pd.DataFrame([["Nom", "LAKA AM'LAY"], ["Contact", "+261"]], columns=['Champ', 'Valeur'])
 
-# =========================
-# LOGO
-# =========================
-try:
-    logo = Image.open("logo.png")
-    st.image(logo, width=140)
-except:
-    st.title("SIMULATEUR DE DEVIS")
+def get_rib():
+    if os.path.exists(RIB_FILE): return pd.read_csv(RIB_FILE)
+    return pd.DataFrame(columns=["Banque", "IBAN/RIB"])
 
-# =========================
-# CHARGEMENT DES DONNÉES
-# =========================
-@st.cache_data
-def load_data():
-    return pd.read_csv("data.csv")
-df = load_data()
-
-# =========================
-# SECTION 1 : CLIENT
-# =========================
-st.divider()
-st.subheader("👤 Informations client")
-col_c1, col_c2 = st.columns(2)
-nom = col_c1.text_input("Nom du client", key=f"n_{st.session_state['form_id']}")
-email = col_c2.text_input("Email", key=f"e_{st.session_state['form_id']}")
-ref = st.text_input("Référence devis", value=str(uuid.uuid4())[:8], key=f"r_{st.session_state['form_id']}")
-
-# =========================
-# SECTION 2 : EXCURSION
-# =========================
-st.divider()
-st.subheader("🧭 Excursion")
-type_exc = st.selectbox("Type", [""] + sorted(df["Type"].unique().tolist()), key=f"t_{st.session_state['form_id']}")
-
-circuit = None
-formule = ""
-transport = ""
-
-if type_exc:
-    df_f = df[df["Type"] == type_exc]
-    formule = st.selectbox("Formule", [""] + sorted(df_f["Formule"].unique().tolist()), key=f"f_{st.session_state['form_id']}")
-    if formule:
-        df_f = df_f[df_f["Formule"] == formule]
-        transport = st.selectbox("Transport", [""] + sorted(df_f["Transport"].unique().tolist()), key=f"tr_{st.session_state['form_id']}")
-        if transport:
-            df_f = df_f[df_f["Transport"] == transport]
-            circuit = st.selectbox("Circuit", [""] + sorted(df_f["Circuit"].unique().tolist()), key=f"c_{st.session_state['form_id']}")
-
-row = None
-if circuit:
-    row = df_f[df_f["Circuit"] == circuit].iloc[0]
-    st.info(f"⏱ Durée : {row['Durée']}")
-
-# =========================
-# SECTION 3 : BESOINS SPÉCIFIQUES
-# =========================
-st.divider()
-st.subheader("📝 Besoins spécifiques")
-notes = st.text_area("Régime alimentaire, allergies ou demandes particulières", key=f"nt_{st.session_state['form_id']}")
-
-# =========================
-# SECTION 4 : OPTIONS & PARTICIPANTS (LOGIQUE MODIFIÉE)
-# =========================
-st.divider()
-st.subheader("➕ Options & Participants")
-
-# Logique : Si Mer -> Options incluses d'office
-is_mer = (type_exc.lower() == "en mer" or "mer" in type_exc.lower())
-
-c_opt1, c_opt2 = st.columns(2)
-with c_opt1:
-    if is_mer:
-        st.write("✨ *Options incluses dans le forfait Mer*")
-        repas = st.checkbox("🍽 Repas", value=True, disabled=True, key="rp_m")
-        guide = st.checkbox("🧭 Guide", value=True, disabled=True, key="gd_m")
-        visite = st.checkbox("🎫 Visites site", value=True, disabled=True, key="vs_m")
-    else:
-        repas = st.checkbox("🍽 Repas (+10 €/pers.)", key=f"rp_{st.session_state['form_id']}")
-        guide = st.checkbox("🧭 Guide (+15 €/pers.)", key=f"gd_{st.session_state['form_id']}")
-        visite = st.checkbox("🎫 Visites (+5 €/pers.)", key=f"vs_{st.session_state['form_id']}")
-
-with c_opt2:
-    nb = st.number_input("Nombre de personnes (Pax)", min_value=1, value=1, key=f"nb_{st.session_state['form_id']}")
-    marge = st.number_input("Marge (%)", min_value=0, value=20, key=f"m_{st.session_state['form_id']}")
-
-# =========================
-# CALCULS ET PDF
-# =========================
-if row is not None:
-    p_base = row["Prix"]
-    
-    # Si c'est terrestre, on ajoute les suppléments. Si c'est mer, suppléments = 0 car déjà dans p_base.
-    if is_mer:
-        total_unit = p_base
-    else:
-        supps = (10 if repas else 0) + (15 if guide else 0) + (5 if visite else 0)
-        total_unit = p_base + supps
-        
-    total_devis = (total_unit * nb) * (1 + marge / 100)
-
-    st.divider()
-    st.metric("TOTAL DEVIS CLIENT", f"{total_devis:.2f} €")
-
-    if st.button("📄 Générer le devis détaillé"):
-        if not nom:
-            st.error("Le nom du client est requis.")
-        else:
-            pdf = FPDF()
-            pdf.add_page()
-            try:
-                pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-                f_f = "DejaVu"
-            except:
-                f_f = "Arial"
-
-            # Design PDF
-            pdf.set_font(f_f, size=18)
-            pdf.cell(0, 15, "DEVIS PRESTATION TOURISTIQUE", ln=True, align='C')
-            pdf.set_font(f_f, size=10)
-            pdf.cell(0, 5, f"Référence : {ref} | Date : {datetime.now().strftime('%d/%m/%Y')}", ln=True, align='C')
-            pdf.ln(10)
-
-            pdf.set_font(f_f, size=11)
-            pdf.cell(0, 7, f"Client : {nom}", ln=True)
-            pdf.cell(0, 7, f"Excursion : {type_exc} | Formule : {formule}", ln=True)
-            pdf.cell(0, 7, f"Participants : {nb} pers.", ln=True)
-            pdf.ln(5)
-
-            # Tableau
-            pdf.set_fill_color(230, 230, 230)
-            pdf.cell(90, 10, "Description", 1, 0, 'C', True)
-            pdf.cell(30, 10, "Qté", 1, 0, 'C', True)
-            pdf.cell(30, 10, "P.U (€)", 1, 0, 'C', True)
-            pdf.cell(35, 10, "Total (€)", 1, 1, 'C', True)
-            
-            # Ligne principale
-            desc_principal = f"Circuit : {circuit}"
-            if is_mer: desc_principal += " (Options incluses)"
-            
-            pdf.cell(90, 8, desc_principal, 1)
-            pdf.cell(30, 8, f"{nb}", 1, 0, 'C')
-            pdf.cell(30, 8, f"{p_base:.2f}", 1, 0, 'C')
-            pdf.cell(35, 8, f"{p_base * nb:.2f}", 1, 1, 'C')
-            
-            # Options (uniquement si terrestre et cochées)
-            if not is_mer:
-                if repas:
-                    pdf.cell(90, 8, "Option : Repas", 1); pdf.cell(30, 8, f"{nb}", 1, 0, 'C'); pdf.cell(30, 8, "10.00", 1, 0, 'C'); pdf.cell(35, 8, f"{10*nb:.2f}", 1, 1, 'C')
-                if guide:
-                    pdf.cell(90, 8, "Option : Guide", 1); pdf.cell(30, 8, f"{nb}", 1, 0, 'C'); pdf.cell(30, 8, "15.00", 1, 0, 'C'); pdf.cell(35, 8, f"{15*nb:.2f}", 1, 1, 'C')
-                if visite:
-                    pdf.cell(90, 8, "Option : Visites", 1); pdf.cell(30, 8, f"{nb}", 1, 0, 'C'); pdf.cell(30, 8, "5.00", 1, 0, 'C'); pdf.cell(35, 8, f"{5*nb:.2f}", 1, 1, 'C')
-
-            # Total
-            pdf.set_font(f_f, size=11)
-            pdf.cell(150, 10, "TOTAL TTC À PAYER", 1, 0, 'R', True)
-            pdf.cell(35, 10, f"{total_devis:.2f} EUR", 1, 1, 'C', True)
-
-            if notes:
-                pdf.ln(5); pdf.set_text_color(200, 0, 0)
-                pdf.multi_cell(0, 6, f"Demandes particulières : {notes}", border=1)
-                pdf.set_text_color(0, 0, 0)
-
-            pdf_bytes = bytes(pdf.output())
-            st.download_button("⬇️ Télécharger le PDF", pdf_bytes, f"devis_{nom}.pdf", "application/pdf")
-            
-            # Historique
-            new_row = {"Date": datetime.now().strftime("%Y-%m-%d"), "Client": nom, "Circuit": circuit, "Total": round(total_devis, 2)}
-            pd.DataFrame([new_row]).to_csv("historique_devis.csv", mode='a', header=not os.path.exists("historique_devis.csv"), index=False, encoding='utf-8-sig')
-
-    st.button("🔄 Nouveau devis", on_click=clear_form)
-
-# =========================
-# HISTORIQUE RAPIDE (CORRIGÉ)
-# =========================
-st.divider()
-with st.expander("📊 Voir l'historique des devis"):
-    hist_file = "historique_devis.csv"
-    
-    if os.path.exists(hist_file):
+def generate_custom_ref(client_name, prefix="D"):
+    count = 1
+    if os.path.exists(HIST_FILE):
         try:
-            # On vérifie si le fichier n'est pas vide avant de lire
-            if os.path.getsize(hist_file) > 0:
-                df_history = pd.read_csv(hist_file)
-                st.dataframe(df_history, use_container_width=True)
+            df = pd.read_csv(HIST_FILE)
+            count = len(df) + 1
+        except: count = 1
+    clean_name = "".join(filter(str.isalnum, client_name)).upper()
+    return f"{prefix}{count:06d}-{clean_name}"
+
+# --- Génération Ticket ---
+def generate_thermal_ticket(type_doc, data, client_name, ref, options_text=""):
+    pdf = FPDF(format=(80, 250))
+    pdf.add_page()
+    pdf.set_margins(4, 4, 4)
+    df_infos = get_info_df()
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, str(df_infos.iloc[0]['Valeur']), ln=True, align='C')
+    pdf.set_font("Arial", '', 8)
+    for i in range(1, len(df_infos)):
+        pdf.cell(0, 4, f"{df_infos.iloc[i]['Champ']}: {df_infos.iloc[i]['Valeur']}", ln=True, align='C')
+    pdf.ln(2); pdf.cell(0, 0, "-"*45, ln=True, align='C'); pdf.ln(2)
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(0, 6, f"{type_doc.upper()}", ln=True, align='C')
+    pdf.set_font("Arial", '', 8)
+    pdf.cell(0, 5, f"Date: {datetime.now().strftime('%d/%m/%y %H:%M')}", ln=True)
+    pdf.cell(0, 5, f"Ref: {ref}", ln=True)
+    pdf.cell(0, 5, f"Client: {client_name}", ln=True)
+    pdf.ln(2); pdf.cell(0, 0, "-"*45, ln=True, align='C'); pdf.ln(2)
+    pdf.set_font("Arial", 'B', 9)
+    pdf.multi_cell(0, 5, f"Circuit: {data.get('Circuit', 'N/A')}")
+    pdf.set_font("Arial", '', 8)
+    pdf.cell(0, 5, f"Pax: {data.get('Pax', 1)} | Formule: {data.get('Formule', '')}", ln=True)
+    if options_text:
+        pdf.set_font("Arial", 'I', 7)
+        pdf.multi_cell(0, 4, f"Détails: {options_text}")
+    pdf.ln(2)
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 10, f"TOTAL: {float(data.get('Total', 0)):.2f} EUR", ln=True, align='R')
+    pdf.ln(2); pdf.cell(0, 0, "-"*45, ln=True, align='C'); pdf.ln(2)
+    pdf.set_font("Arial", 'B', 7)
+    pdf.cell(0, 4, "COORDONNEES BANCAIRES:", ln=True)
+    pdf.set_font("Arial", '', 7)
+    ribs = get_rib()
+    for _, row in ribs.iterrows():
+        pdf.cell(0, 4, f"{row['Banque']}: {row['IBAN/RIB']}", ln=True)
+    pdf.ln(5); pdf.set_font("Arial", 'I', 8)
+    pdf.cell(0, 5, "Merci de votre confiance !", ln=True, align='C')
+    return pdf.output(dest='S').encode('latin-1')
+
+# =========================
+# INTERFACE
+# =========================
+tab1, tab2, tab3 = st.tabs(["📝 DEVIS", "🧾 FACTURE", "⚙️ CONFIG"])
+
+with tab1:
+    try:
+        df_excu = pd.read_csv("data.csv")
+        nom_c = st.text_input("👤 Client", key="nom_client_devis")
+        tel_c = st.text_input("📱 WhatsApp (ex: 26132...)", key="tel_client_devis")
+        type_e = st.selectbox("🌍 Type", [""] + sorted(df_excu["Type"].unique().tolist()))
+        
+        if type_e:
+            df_f = df_excu[df_excu["Type"] == type_e]
+            formule = st.selectbox("💎 Formule", sorted(df_f["Formule"].unique().tolist()))
+            transport = st.selectbox("🚗 Transport", sorted(df_f[df_f["Formule"] == formule]["Transport"].unique().tolist()))
+            circuit = st.selectbox("📍 Circuit", sorted(df_f[(df_f["Formule"] == formule) & (df_f["Transport"] == transport)]["Circuit"].unique().tolist()))
+            row_d = df_f[df_f["Circuit"] == circuit].iloc[0]
+            
+            supplements = 0
+            opts_list = [f"Transp: {transport}"]
+            if type_e.lower() == "terrestre":
+                col1, col2 = st.columns(2)
+                with col1:
+                    repas = st.checkbox("🍽️ Repas (+10€)")
+                    guide = st.checkbox("🧭 Guide (+15€)")
+                with col2:
+                    visite = st.checkbox("🎫 Visite (+5€/site)")
+                    if visite:
+                        nb_sites = st.number_input("Nombre de sites", min_value=1, value=1)
+                        supplements += (5 * nb_sites)
+                        opts_list.append(f"Visite ({nb_sites} sites)")
+                if repas: supplements += 10; opts_list.append("Repas")
+                if guide: supplements += 15; opts_list.append("Guide")
+
+            nb_pax = st.number_input("👥 Pax", min_value=1, value=1)
+            marge = st.slider("📈 Marge %", 0, 100, 20)
+            total_ttc = ((row_d['Prix'] + supplements) * nb_pax) * (1 + marge/100)
+            st.metric("TOTAL TTC", f"{total_ttc:.2f} €")
+
+            if st.button("🔥 GENERER LE DEVIS"):
+                if not nom_c: st.error("Nom client obligatoire")
+                else:
+                    ref_final = generate_custom_ref(nom_c, "D")
+                    opts_text = ", ".join(opts_list)
+                    ticket_bytes = generate_thermal_ticket("Devis", {"Circuit": circuit, "Pax": nb_pax, "Formule": formule, "Total": total_ttc}, nom_c, ref_final, opts_text)
+                    
+                    # Sauvegarde
+                    new_entry = {"Date": datetime.now().strftime("%Y-%m-%d"), "Ref": ref_final, "Client": nom_c, "Circuit": circuit, "Pax": nb_pax, "Total": round(total_ttc, 2), "Formule": formule, "Options": opts_text}
+                    pd.DataFrame([new_entry]).to_csv(HIST_FILE, mode='a', header=not os.path.exists(HIST_FILE), index=False, encoding='utf-8-sig')
+                    
+                    # Affichage
+                    base64_pdf = base64.b64encode(ticket_bytes).decode('utf-8')
+                    st.markdown(f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="400"></iframe>', unsafe_allow_html=True)
+                    
+                    # Bouton Télécharger/Imprimer (Plus compatible mobile)
+                    st.download_button(label="🖨️ TELECHARGER & IMPRIMER", data=ticket_bytes, file_name=f"{ref_final}.pdf", mime="application/pdf")
+                    
+                    # Bouton Nouveau
+                    if st.button("➕ NOUVEAU DEVIS", key="btn_reset_devis"): reset_app()
+    except Exception as e: st.info("Prêt pour un nouveau devis")
+
+with tab2:
+    st.subheader("Facturation")
+    if os.path.exists(HIST_FILE):
+        df_h = pd.read_csv(HIST_FILE)
+        devis_list = [r for r in df_h['Ref'].unique() if r.startswith("D")]
+        sel_ref = st.selectbox("Devis à convertir", [""] + devis_list)
+        
+        if sel_ref:
+            f_data = df_h[df_h['Ref'] == sel_ref].iloc[0]
+            ref_f = sel_ref.replace("D", "F", 1)
+            
+            if st.button("📄 GENERER LA FACTURE"):
+                ticket_f = generate_thermal_ticket("Facture", f_data, f_data['Client'], ref_f, f_data.get('Options', ''))
+                base64_f = base64.b64encode(ticket_f).decode('utf-8')
+                st.markdown(f'<iframe src="data:application/pdf;base64,{base64_f}" width="100%" height="400"></iframe>', unsafe_allow_html=True)
                 
-                # Option pour télécharger l'historique complet en Excel/CSV
-                st.download_button(
-                    label="📥 Exporter l'historique CSV",
-                    data=df_history.to_csv(index=False).encode('utf-8-sig'),
-                    file_name="historique_complet.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.info("L'historique est actuellement vide.")
-        except Exception as e:
-            st.error(f"Erreur lors de la lecture de l'historique : {e}")
-            if st.button("Réinitialiser le fichier historique"):
-                os.remove(hist_file)
-                st.rerun()
-    else:
-        st.write("Aucun historique pour le moment. Générez votre premier devis !")
+                st.download_button(label="🖨️ TELECHARGER & IMPRIMER", data=ticket_f, file_name=f"{ref_f}.pdf", mime="application/pdf")
+                
+                if st.button("➕ NOUVELLE FACTURE"): reset_app()
+    else: st.info("Aucun historique")
 
-
-
-
+with tab3:
+    st.subheader("Configuration")
+    if st.button("🔄 RESET COMPLET"): reset_app()
+    df_i = get_info_df()
+    new_i = st.data_editor(df_i, num_rows="dynamic")
+    if st.button("Sauver En-tête"): new_i.to_csv(INFO_FILE, index=False)
